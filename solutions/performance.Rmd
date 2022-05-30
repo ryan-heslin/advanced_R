@@ -1,0 +1,221 @@
+---
+title: "`r params$title`"
+author: "Ryan Heslin"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+header-includes:
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{2em}
+params:
+    title: "Chapters 23-24: Optimization"
+output:
+  pdf_document:
+    highlight: "kate"
+    df_print: "kable"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  comment = "",
+  fig.pos = "",
+  message = FALSE,
+  tidy = "styler",
+  warning = FALSE,
+  fig.align = "center",
+  highlight = TRUE
+)
+```
+
+# Profilers 
+
+Profilers run code repeatedly, pausing every few seconds to record the active call 
+stack. This is imprecise, so results are stochastic. 
+
+```{r}
+library(bench)
+library(profvis)
+
+source(here::here("misc/to_profile.R"))
+profvis(f())
+```
+
+# 1. 
+
+Lazy evaluation often baffles the profiler.
+
+`torture` invokes the garbage collector for almost all memory allocations (making it torturous for the poor beast). 
+Naturally, it makes this code run veeeeery slowly.
+```{r, eval = FALSE}
+f <- function(n = 1e5) {
+  x <- rep(1, n)
+  rm(x)
+}
+profvis(f(), torture = TRUE)
+```
+
+# Microbenchmarks 
+
+Microbenchmarks measure the performance of small code snippets. They can help pinpoint bottlenecks.
+
+`rm` calls `vapply` and `c`, and torture slowed them down drastically.
+
+
+```{r}
+subscript <- c("expression", "min", "median", "itr/sec", "n_gc")
+```
+
+## 1. 
+
+I expect the first to be slower.
+`bench::mark` takes longer because it runs the snippet repeatedly to obtain an accurate summary, 
+while `system.time` just runs once.
+```{r, eval = FALSE}
+n <- 1e6
+x <- runif(100)
+
+system.time(for (i in 1:n) sqrt(x)) / n
+system.time(for (i in 1:n) x^0.5) / n
+
+bench::mark(
+  for (i in 1:n) sqrt(x),
+  for (i in 1:n) x^0.5,
+  iterations = 1
+)[subscript]
+```
+
+## 2. 
+
+I expect the second to be slower. I'm wrong.
+```{r}
+bench::mark(
+  x^(1 / 2),
+  exp(log(x) / 2)
+)
+```
+
+# Optimization
+
+The worst pitfalls are writing fast but incorrect code, and writing code you only _think_ is faster.
+```{r}
+mean1 <- function(x) mean(x)
+mean2 <- function(x) sum(x) / length(x)
+n <- runif(1e5)
+```
+
+Those aren't the same as Hadley's results.
+```{r}
+bench::mark(
+  mean1(x),
+  mean2(x)
+)[subscript]
+```
+
+# Checking for Existing Solutions 
+
+## 1. 
+
+Use `lm.fit` instead of `lm`, or one of the implementations of `fastLm` in several Rcpp packages. Or just do matrix multiplication!
+
+## 2. 
+
+`fmatch`. It uses hashing, so initial lookups aren't much faster, but subsequent ones take constant time.
+
+## 3. 
+
+`as.Date` helpfully 
+offers a format specification and the option to set the epoch. `lubridate` has high-level specialized functions (e.g., `mdy`). `strptime` is simple but usable. `lubridate`'s `parse_date_time` offers a cleaner interface to format specification (no nasty `%` escapes).
+    
+## 4. 
+
+`zoo` and `data.table` come to mind.
+
+## 5. 
+
+In base, one can try `nlm` or use `optim` with a faster method. The CRAN task view reveals the `optimx` package and many packages implementing solvers. See [https://stackoverflow.com/questions/3757321/moving-beyond-rs-optim-function].
+
+# Doing Less 
+
+Rewriting a function to use only a particular kind of input is 
+dangerous but potentially effective. 
+
+## 1. 
+
+The dotted versions are "bare-bones" implementations that expect numeric matrices and do not name outputs.
+
+## 3. 
+
+
+```{r}
+library(testthat)
+table2 <- function(x, y) {
+  x2 <- factor(x, levels = seq(from = min(x), to = max(x)))
+  y2 <- factor(y, levels = seq(from = min(y), to = max(y)))
+  dims <- c(nlevels(x2), nlevels(y2))
+  bin <- (as.integer(x2) - 1 + dims[[2]] * (as.integer(y2) - 1L)) + 1
+  pd <- dims[[1]] * dims[[2]]
+  out <- array(tabulate(bin, pd), dims, dimnames = list(levels(x2), levels(y2)))
+  class(out) <- "table"
+  out
+}
+set.seed(1)
+x <- sample(30, 100, replace = TRUE)
+y <- sample(30, 100, replace = TRUE)
+expect_equivalent(table2(x, y), table(x, y))
+```
+
+## 2. 
+
+This doesn't work for cases where the expected count is 0, but in that case the exact chi-square test is undefined anyway.
+```{r}
+set.seed(1)
+chisq2 <- function(x, y) {
+  O <- table2(x, y)
+  E <- outer(rowSums(O), colSums(O)) / (sum(O))
+  print(E)
+  sum((O - E)^2 / E)
+}
+x <- sample(30, 100, replace = TRUE)
+y <- sample(30, 100, replace = TRUE)
+chisq2(x, y)
+chisq.test(table(x, y))
+```
+
+## Vectorization 
+
+This usually just means delegating to (or writing) the appropriate vectorized C function.
+
+## 1. 
+
+It creates a vector of 10 random normal variables, with the means given by `10:1`
+The `mean` and `sd` arguments are 
+vectorized, so a vector of random variables with different parameters 
+can be created in a single call.
+```{r}
+rnorm(10, mean = 10:1)
+```
+
+## 2. 
+
+The performance penalty of using `apply` grows nonlinearly with input size.
+```{r}
+sizes <- c(100, 1000, 10000)
+data <- as.data.frame(matrix(rnorm(60000), ncol = 6))
+(lapply(sizes, \(x) bench::mark(rowSums(data[seq_len(x), ]), apply(data[seq_len(x), ],
+  MARGIN = 1, sum
+))) |>
+  do.call(what = rbind))[subscript]
+```
+
+## 3.
+
+Actually, it's slower.
+```{r}
+x <- rnorm(10e6)
+weights <- sample(10, 10e6, replace = TRUE)
+bench::mark(
+  sum(x * weights),
+  c(crossprod(x, weights))
+)[subscript]
+```
+
+A last piece of advice is to avoid for loops that create unnecessary copies of objects.
