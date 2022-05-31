@@ -26,12 +26,11 @@ knitr::opts_chunk$set(
 )
 ```
 
-# Basics 
-
+# Basics
 
 ## 1.
 
-`t.test` is the generic for the `t.test` function, which dispatches to the appropriate method. 
+`t.test` is the generic for the `t.test` function, which dispatches to the appropriate method.
 `t.data.frame` is the method of `t` for the `data.frame` class (it just coerces to matrix and invokes `NextMethod`).
 
 ## 2.
@@ -40,13 +39,13 @@ knitr::opts_chunk$set(
 
 ## 3.
 
-It coerces a data frame to a data frame, which means stripping classes inherited before `data.frame` and optionally adding row names. The overuse of dot separators makes it hard to understand that this 
+It coerces a data frame to a data frame, which means stripping classes inherited before `data.frame` and optionally adding row names. The overuse of dot separators makes it hard to understand that this
 is an S3 method, a problem that could have been solved by using snake case instead.
 
 ## 4.
 
 
-The first dispatches to `mean.Date`, which coerces a date to integer, calls `mean` on it, and coerces back to `Date`. 
+The first dispatches to `mean.Date`, which coerces a date to integer, calls `mean` on it, and coerces back to `Date`.
 The second coerces to integer beforehand without doing this.
 
 ```{r}
@@ -73,7 +72,7 @@ x
 ## 6.
 
 
-A `table` object is an atomic vector array. 
+A `table` object is an atomic vector array.
 Like arrays in general, it has dimensions and a `dimnames` attribute. The class is mostly used for its print method.
 
 ```{r}
@@ -81,43 +80,56 @@ x <- table(rpois(100, 5))
 x
 ```
 
-# Classes 
+# Classes
+
+I elect not to enforce unique names, and I generate default column names the same way as `data.frame`.
 
 ## 1.
 
 ```{r}
-data.frame2 <- function(..., row_names = NULL) {
+data.frame2 <- function(..., .row_names = NULL) {
   dots <- list(...)
   l_dots <- length(dots)
   if (l_dots == 0) {
-    return(structure(list(), class = "data.frame"))
+    return(structure(list(),
+      class = "data.frame",
+      row.names = make_row_names(.row_names, 0)
+    ))
   }
   dots_names <- names(dots)
-  has_names <- is.null(dots_names)
+  has_names <- !is.null(dots_names)
   col_names <- vector("character", l_dots)
   col_data <- vector("list", l_dots)
-  unnamed <- rep(FALSE, l_dots)
   for (i in seq_along(dots)) {
     el <- dots[[i]]
-    if ("dim" %in% attributes(el) && dim(el) > 1) {
+    el_name <- dots_names[[i]]
+    if (length(dim(el)) > 1) { # Data frame or array
       if (is.array(el)) el <- as.data.frame(el)
       el_rows <- nrow(el)
+      # Ignore element name and instead combine with existing column names
       if (has_names) {
-        dots_names[[i]] <- el_name
-        if (el_name == "") {
-          unnamed[[i]] <- TRUE
-        } else {
-          colnames(el) <- paste(el_name, colnames(el), sep = "_")
+        col_names[[i]] <- ""
+        if (el_name != "") {
+          colnames(el) <- paste(el_name, colnames(el,
+            do.NULL = TRUE,
+            prefix = "V"
+          ),
+          sep
+          = "_"
+          )
         }
       }
-    } else {
+    } else if (!is.array(el) &&
+      is.vector(el)) { # Vector case
       el_rows <- length(el)
-      if (has_names && (el_name <- dots_names[[i]]) == "") {
-        unnamed[[i]] <- TRUE
-      } else {
+      el <- list(el) # Ensure correct concatenation
+      if (has_names && el_name != "") {
         col_names[[i]] <- el_name
       }
+    } else {
+      stop("Cannot coerce object")
     }
+
     if (i == 1) {
       n_rows <- el_rows
     } else if (n_rows != el_rows) {
@@ -125,35 +137,82 @@ data.frame2 <- function(..., row_names = NULL) {
     }
     col_data[[i]] <- el
   }
-  # Validate row names (same length as data, unique)
-  if (!is.null(row_names)) {
-    if (!is.character(row_names)) row_names <- as.character(row_names)
-    if (length(row_names) != n_rows) stop("Length of row names does not match data length")
-    if (anyDuplicated(row_names)) stop("Duplicate row names")
-  }
-  # Supply default column names for unnamed arguments
-  col_names[unnamed] <- paste0("V", seq_along(unnamed))
-  names(col_data) <- el_names
-  full_data <- do.call(c, col_data)
 
-  structure(full_data, class = c("list", "data.frame"), row.names = row_names)
+  .row_names <- make_row_names(.row_names, n_rows)
+
+  # Supply default column names for unnamed arguments
+  if (has_names) {
+    unnamed <- is.na(col_names)
+    col_names[unnamed] <- paste0("V", seq_along(unnamed))
+    names(col_data) <- col_names
+  }
+  full_data <- do.call(c, col_data)
+  dnn <- c(.row_names, names(full_data))
+  # class(full_data) <- "data.frame"
+
+  structure(
+    .Data = full_data, class = c("data.frame"),
+    row.names = .row_names
+  )
+  # dim = c(n_rows, length(full_data))
+  # )
 }
+
+# Check row names and create if necessary
+make_row_names <- function(rn, n_rows) {
+  if (!is.null(rn)) {
+    if (length(rn) != n_rows) {
+      stop("Length of row names does not match data length")
+    }
+    if (anyDuplicated(rn)) stop("Duplicate row names")
+  } else {
+    rn <- seq_len(n_rows)
+  }
+  as.character(rn)
+}
+
+library(testthat)
+
+data.frame2(mtcars, x = mtcars$cyl)
+data.frame2(mpg = mtcars$mpg)
+data.frame2(mpg = mtcars$mpg, cyl = mtcars$cyl)
+data.frame2(unname(as.matrix(mtcars)))
+data.frame2(unname(as.matrix(mtcars)), .row_names = rownames(mtcars))
+data.frame2(mtcars$cyl, y = as.matrix(mtcars$disp), mtcars[4:6], .row_names = rownames(mtcars))
+data.frame2()
+
+expect_error(data.frame2(NULL))
+expect_error(data.frame2(mtcars$cyl, iris$Species))
 ```
 
-## 2. 
+## 2.
 
 I replicate the base behavior of replacing values absent from the levels with `NA` and excluding `NA` from the levels.
 ```{r}
-new_factor <- function(x = integer(), levels = character()) {
+new_factor <- function(x = integer(), levels = character(), contr = NULL, ...) {
   stopifnot(is.integer(x))
   stopifnot(is.character(levels))
   levels <- levels[!is.na(levels)]
 
-  structure(
+  nlevel <- length(unique(levels))
+  out_call <-
+    if (!is.null(contr)) {
+      if (is.character(contr)) contr <- match.fun(contr)
+      if (is.function(contr)) {
+        contr <- contr(nlevel, ...)
+      }
+      if (!is.matrix(contr)) stop("Contrasts must be a matrix")
+      if (nrow(contr) != nlevel) {
+        stop("If supplied, contrasts must have one row for each level of x")
+      }
+    }
+  out <- structure(
     x,
     levels = levels,
     class = "factor"
   )
+  if (!is.null(contr)) contrasts(out) <- contr
+  out
 }
 
 validate_factor <- function(x) {
@@ -179,48 +238,83 @@ validate_factor <- function(x) {
 }
 
 
-factor <- function(x = character(), levels = unique(x)) {
+factor <- function(x = character(), levels = unique(x), contr = NULL, ...) {
   levels <- as.character(levels)
   ind <- match(x, levels)
-  validate_factor(new_factor(ind, levels))
+  validate_factor(new_factor(ind, levels, contr = contr, ...))
 }
 
 factor(c("a", "a", "b"))
 factor(1:3)
 factor(1:3, levels = c(1, 3))
 factor(1:3, levels = "a")
+factor(1:3, contr = "contr.helmert")
+expect_error(factor(1:3, levels = 1, contr = "contr.poly"))
+expect_error(factor(1:3, contr = 1:5))
 #> [1] a a b
 #> Levels: a b
 ```
 
-## 3. 
+## 3.
 
-The base `factor` has the additional features of mapping different labels to the same levels and ordering the factors. More 
+The base `factor` has the additional features of mapping different labels to the same levels and ordering the factors. More
 saliently, it assigns values that do not appear in the levels `NA` instead of throwing an error.
 
-## 4. 
+## 4.
+
+Contrasts refer to different ways of encoding categorical variables in models in
+order numerically express the effects of different levels. Above, I rewrote
+`factor` to use this attribute if supplied.
 
 
-## 5. 
+## 5.
+
+The validator should confirm that inputs are integer vectors whose elements are all in [1, 3899],  the range of valid Roman numerals, or character vectors of such valid Roman numerals. A constructor would then convert the input to integer, if necessary, then just set its class to `roman`, enabling the specialized methods to do their work.
 
 
-## 6. 
-
-The validator should confirm that inputs are integer vectors whose elements are all in [1, 3899],  the range of valid Roman numerals, or character vectors of such valid Roman numerals. A constructor would then convert the input to integer, if necessary, then just set its class to `roman`, enabling the specialized methods to do their work. 
 
 
-`UseMethod` constructs a call by matching arguments in the generic's execution environment _as they came in_, forwarding them, then matching arguments defined in the execution environment. These are then forwarded to the method that is matched. So the redefinition of `x` is ignored because only the value passed is read.
+# Generics and Methods
+
+## 1.
+
+It works correctly because `UseMethod` ultimately dispatches to `t.default`, since there is no `test` method for `t`.
+```{r}
+library(sloop)
+
+x <- structure(1:10, class = "test")
+t(x)
+```
+
+## 2.
 
 
-# Generics and Methods 
+```{r}
+s3_methods_class("table")
+```
 
-#TODO 
+## 3.
 
-# Object Styles 
 
-#TODO 
+```{r}
+s3_methods_class("ecdf")
+```
 
-# Inheritance
+## 4.
+
+`print`, naturally
+```{r}
+generics <- lsf.str("package:base")
+generics <- generics[sapply(generics, isS3stdGeneric)]
+names(generics) <- generics
+sapply(generics, \(x) nrow(s3_methods_generic(x))) |>
+  sort(decreasing = TRUE) |>
+  head()
+```
+
+## 5.
+
+
 ```{r}
 g <- function(x) {
   x <- 10
@@ -236,7 +330,39 @@ g(x)
 #>  1 10
 ```
 
+`UseMethod` constructs a call by matching arguments in the generic's execution environment _as they came in_, forwarding them, then matching arguments defined in the execution environment. These are then forwarded to the method that is matched. So the redefinition of `x` is ignored because only the value passed is read.
+This ignores the usual rule for argument lookup.
+
 `NextMethod` skips the first method matched by `UseMethod` and continues searching, potentially to internal generics. Arguments are passed as promises to evaluate in the caller environment of NextMethod. This makes it possible to force use of a default or internal method by placing a call to `NextMethod` in a class-specific method.
+
+## 6.
+
+The answer differs for the many different methods implemented.
+
+# Object Styles
+
+## 1.
+
+Vector : `factor`, `as.Date`, `ordered`
+
+Record: `as.POSIXct`
+
+Data frame: arguably `table` is a generalization
+
+Scalar: `lm`, `ecdf`, `I`
+
+## 2.
+
+`lm` is a list of information related to the model. First, the call should be captured and stored. If requested, data like model weights or the QR matrix used in model fitting should be retained. Once the model is fitted, the following should be recorded for each observation:
+
+* Observed response
+* Fitted value
+* Residual
+
+Beyond that, the model matrix, and some details like factor contrasts and unique `x` levels, have to be stored as well.
+
+# Inheritance
+
 ```{r}
 new_secret <- function(x, ..., class = character()) {
   stopifnot(is.double(x))
@@ -265,8 +391,8 @@ t(x)
 
 ## 1.
 
-`[.Date` delegates to `NextMethod`, passing the 
-most specific class of the argument `x` as 
+`[.Date` delegates to `NextMethod`, passing the
+most specific class of the argument `x` as
 determined by `oldClass`. This means a `Date` subclass `foo` is dispatched to `[.foo`.
 
 
@@ -275,9 +401,9 @@ library(sloop)
 s3_methods_generic("[")
 ```
 
-## 2. 
+## 2.
 
-It looks like `POSIXct` methods are more verbose 
+It looks like `POSIXct` methods are more verbose
 and do more elaborate checking involving timezones.
 `print` is naturally the same for both.
 
@@ -296,25 +422,25 @@ generic2.b <- function(x) {
 generic2(structure(list(), class = c("b", "a2")))
 ```
 
-# Dispatch Details 
+# Dispatch Details
 
 
-## 1. 
+## 1.
 
-Internal methods dispatch only on implicit class (what `1:5` has), not explicit 
+Internal methods dispatch only on implicit class (what `1:5` has), not explicit
 class set by `class`.
 
 ## 2.
 
-`Math.data.frame` checks types before 
-using `lapply` to compute the operation. 
-`Math.difftime` records units before forwarding 
-to `NextMethod`. The `factor` and `PosixLT` methods 
+`Math.data.frame` checks types before
+using `lapply` to compute the operation.
+`Math.difftime` records units before forwarding
+to `NextMethod`. The `factor` and `PosixLT` methods
 warn the user that calling them is nonsensical.
 ```{r}
 sloop::s3_methods_generic("Math")
 ```
 
-## 3. 
+## 3.
 
 It tracks units and throws an error for unsupported operations.
