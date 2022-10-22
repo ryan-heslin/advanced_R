@@ -1,0 +1,399 @@
+---
+title: "`r params$title`"
+author: "Ryan Heslin"
+date: "`r format(Sys.Date(), '%B %e, %Y')`"
+header-includes:
+  - \setlength{\parindent}{2em}
+  - \setlength{\parskip}{2em}
+params:
+    title: "Chapter 14: S4"
+output:
+  pdf_document:
+    highlight: "kate"
+    df_print: "kable"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  comment = "",
+  fig.pos = "",
+  message = FALSE,
+  tidy = "styler",
+  warning = FALSE,
+  fig.align = "center",
+  highlight = TRUE
+)
+```
+
+Everything lives in `methods`.
+
+```{r}
+library(methods)
+```
+
+
+The `setClass` constructor declares a class with given slots. `new` is the constructor.
+
+
+```{r}
+setClass("Person",
+  slots = c(
+    name = "character",
+    age = "numeric"
+  )
+)
+john <- new("Person", name = "John Smith", age = NA_real_)
+```
+
+Yes, you are responsible for defining accessors, usually as S4 generics.
+
+
+```{r}
+setGeneric("age", function(x) standardGeneric("age"))
+setGeneric("age<-", function(x, value) standardGeneric("age<-"))
+```
+
+
+```{r}
+setMethod("age", "Person", function(x) x@age)
+setMethod("age<-", "Person", function(x, value) {
+  x@age <- value
+  x
+})
+
+age(john) <- 50
+age(john)
+
+
+## Exercises
+
+
+## 1.
+
+It has six slots, each a number storing a different unit of time, plus an odd one called `.Data`. The documentation lists 11 accessors.
+```{r}
+x <- lubridate::period(4, units = "years")
+str(x)
+```
+
+
+## 2.
+
+The docs say:
+
+
+```
+     Authors of formal (‘S4’) methods can provide documentation on
+     specific methods, as well as overall documentation on the methods
+     of a particular function.  The ‘"?"’ operator allows access to
+     this documentation in three ways.
+
+     The expression ‘methods?f’ will look for the overall documentation
+     methods for the function ‘f’.  Currently, this means the
+     documentation file containing the alias ‘f-methods’.
+
+     There are two different ways to look for documentation on a
+     particular method.  The first is to supply the ‘topic’ argument in
+     the form of a function call, omitting the ‘type’ argument.  The
+     effect is to look for documentation on the method that would be
+     used if this function call were actually evaluated. See the
+     examples below.  If the function is not a generic (no S4 methods
+     are defined for it), the help reverts to documentation on the
+     function name.
+
+     The ‘"?"’ operator can also be called with ‘doc_type’ supplied as
+     ‘method’; in this case also, the ‘topic’ argument is a function
+     call, but the arguments are now interpreted as specifying the
+     class of the argument, not the actual expression that will appear
+     in a real call to the function.  See the examples below.
+
+     The first approach will be tedious if the actual call involves
+     complicated expressions, and may be slow if the arguments take a
+     long time to evaluate.  The second approach avoids these issues,
+     but you do have to know what the classes of the actual arguments
+     will be when they are evaluated.
+
+     Both approaches make use of any inherited methods; the signature
+     of the method to be looked up is found by using ‘selectMethod’
+     (see the documentation for ‘getMethod’).  A limitation is that
+     methods in packages (as opposed to regular functions) will only be
+     found if the package exporting them is on the search list, even if
+     it is specified explicitly using the ‘?package::generic()’
+     notation.
+```
+
+So `methods?f` brings up general method documentation, and documentation on particualr methods can be found by either specifying types in the call,
+or by passing objects with the relevant types, as in the example `?combo(1:10, letters)`
+
+
+# Classes
+
+`setClass` takes three arguments
+
+* Class name
+* Named character vector of names and classes of slots
+* List of slot prototypes - optional, but strongly recommended
+
+
+  ```{r}
+setClass("Person",
+    slots = c(
+        name = "character",
+        age = "numeric"
+    ),
+    prototype = list(
+        name = NA_character_,
+        age = NA_real_
+    )
+)
+
+setClass("Employee",
+    contains = "Person",
+    slots = c(
+        boss = "Person"
+    ),
+    prototype = list(
+        boss = new("Person")
+    )
+)
+
+me <- new("Person", name = "Hadley")
+str(me)
+#> Formal class 'Person' [package ".GlobalEnv"] with 2 slots
+#>   ..@ name: chr "Hadley"
+#>   ..@ age : num NA
+```
+
+`is` tests inheritance
+```{r}
+is(new("Person"))
+#> [1] "Person"
+is(new("Employee"))
+#> [1] "Employee" "Person"
+```
+
+
+In R, as in Python, classes are both defined and instantiated at
+runtime. Modifying a class after declaring it is an error:
+
+
+```{r, error = TRUE}
+setClass("A", slots = c(x = "numeric"))
+a <- new("A", x = 10)
+
+setClass("A", slots = c(a_different_slot = "numeric"))
+a
+#> An object of class "A"
+#> Slot "a_different_slot":
+#> Error in slot(object, what): no slot of name "a_different_slot" for this object
+#> of class "A"
+```
+
+You should define a helper constructor
+for users and reserve `new` for you,
+the developer:
+
+
+```{r}
+Person <- function(name, age = NA) {
+    age <- as.double(age)
+
+    new("Person", name = name, age = age)
+}
+
+Person("Hadley")
+#> An object of class "Person"
+#> Slot "name":
+#> [1] "Hadley"
+#>
+#> Slot "age":
+#> [1] NA
+```
+
+`setValidity` converts a function into a validator for the class:
+
+```{r}
+setValidity("Person", function(object) {
+    if (length(object@name) != length(object@age)) {
+        "@name and @age must be same length"
+    } else {
+        TRUE
+    }
+})
+```
+`new` will call this validator, though `validObject` can check objects for you.
+
+## 1.
+
+Some fields are deprecated, so I omit them.
+```{r}
+args(utils::person)
+setOldClass("list")
+setClassUnion("listORcharacter", c("list", "character"))
+fields <- names(formals(utils::person))
+fields <- fields[!fields %in% c("first", "last")]
+n_fields <- length(fields)
+
+slots <- rep("character", length.out = n_fields)
+names(slots) <- fields
+slots[c("comment", "role")] <- "listORcharacter"
+
+prototypes <- replicate(NA_character_, n = n_fields, simplify = FALSE)
+
+names(prototypes) <- names(slots)
+prototypes[c("comment", "role")] <- list(NULL)
+
+setClass("MyPerson", slots = slots, prototype = rep(NA_character_, length.out = length(fields)))
+
+all_slots_same_length <- function(object) {
+    slots <- slotNames(object)
+    out <- TRUE
+
+    if (length(slots) > 1) {
+        target <- length(slot(object, slots[[1]]))
+        for (slt in slots[-1]) {
+            this_length <- length(slot(object, slt))
+            if (this_length != target) {
+                out <- paste0("@", slt, " must have length ", target, " not ", this_length)
+                break
+            }
+        }
+    }
+    out
+}
+setValidity("MyPerson", all_slots_same_length)
+
+me <- new("MyPerson",
+    given = "Ryan", family = "Heslin", middle = "William",
+    email = "not.publicly.available@gmail.com", role = "Author", comment = "Ugh, hate that guy"
+)
+me@role <- list("underachiever")
+```
+
+## 2. 
+
+It creates a virtual class: one useful as a parent, but not possible to instantiate.
+```{r, error = FALSE}
+setClass("dummy")
+new("dummy")
+```
+
+## 3.
+
+Use a helper to convert to integer codes before instantiating. Maybe allow an option for NA as a level.
+```{}
+setClass("my_factor", slots = c(values = "integer", levels = "character", labels = "character", ordered = "logical"), 
+prototype = list(values = NA_integer_, levels = NA_character, labels = NA_character_, ordered = FALSE)
+```
+
+For dates, both should inherit from a virtual class. `POSIXlt` needs various date components (month, year, etc.), plus a timezone and a format. The time fields should default to zero. `POSIXct` just needs to keep track of seconds since the UNIX epoch, leaving formatting to the print method.
+
+For data frames:
+```{}
+new("MyDataFrame", slots = c(data = "list", rownames = "character"), prototype = list(data = list(), rownames = character()) )
+```
+
+
+## Generics and Methods 
+
+Generics do method dispatch. Don't wrap the generic name in braces, for some obscure reason.
+
+
+```{r}
+setGeneric("myGeneric", function(x) standardGeneric("myGeneric"))
+```
+
+Only one argument should be used: `signature`, controlling the arg used for dispatch. Arguments can be included to force methods to use them.
+```{r}
+setGeneric("myGeneric",
+    function(x, ..., verbose = TRUE) standardGeneric("myGeneric"),
+    signature = "x"
+)
+```
+
+`setMethod` has a `signature` argument that can take multiple values, enabling multiple dispatch
+```{r}
+setMethod("myGeneric", "Person", function(x) {
+    # method implementation
+})
+```
+
+The `show` method handles printing. You 
+have to retrieve the args for a generic 
+before writing a method for it.
+
+```{r}
+args(getGeneric("show"))
+#> function (object)
+#> NULL
+```
+
+Example:
+
+```{r}
+setMethod("show", "Person", function(object) {
+    cat(is(object)[[1]], "\n",
+        "  Name: ", object@name, "\n",
+        "  Age:  ", object@age, "\n",
+        sep = ""
+    )
+})
+```
+
+Define reusable generics so interface components can be shared across classes:
+
+
+```{r}
+setGeneric("name", function(x) standardGeneric("name"))
+setMethod("name", "Person", function(x) x@name)
+
+name(john)
+#> [1] "John Smith"
+```
+
+Setters, if provided, should always validate.
+
+
+```{r, error = TRUE}
+setGeneric("name<-", function(x, value) standardGeneric("name<-"))
+setMethod("name<-", "Person", function(x, value) {
+    x@name <- value
+    validObject(x)
+    x
+})
+
+name(john) <- "Jon Smythe"
+name(john)
+#> [1] "Jon Smythe"
+
+name(john) <- letters
+#> Error in validObject(x): invalid class "Person" object: @name and @age must be
+#> same length
+```
+
+
+## 1. 
+
+
+```{r}
+setGeneric("age", function(x) standardGeneric("age"))
+setMethod("age", "Person", function(x) x@age)
+age(john)
+```
+
+## 2. 
+
+`setGeneric` actually creates the generic, while the function passed to it invokes it.
+
+## 3. 
+
+If the name of the class is hard-coded in `show`, subclasses will print the name of the parent class.
+
+## 4.
+
+We get a warning, but the method still works.
+```{r}
+setMethod("age", "Person", function(y) x@age)
+age(john)
+```
