@@ -15,33 +15,33 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo = TRUE,
-  comment = "",
-  fig.pos = "",
-  message = FALSE,
-  tidy = "styler",
-  warning = FALSE,
-  fig.align = "center",
-  highlight = TRUE
+    echo = TRUE,
+    comment = "",
+    fig.pos = "",
+    message = FALSE,
+    tidy = "styler",
+    warning = FALSE,
+    fig.align = "center",
+    highlight = TRUE
 )
 ```
 
-Everything lives in `methods`.
+# Basics
+
+Everything S4-related lives in `methods`.
 
 ```{r}
 library(methods)
 ```
 
-
 The `setClass` constructor declares a class with given slots. `new` is the constructor.
-
 
 ```{r}
 setClass("Person",
-  slots = c(
-    name = "character",
-    age = "numeric"
-  )
+    slots = c(
+        name = "character",
+        age = "numeric"
+    )
 )
 john <- new("Person", name = "John Smith", age = NA_real_)
 ```
@@ -54,20 +54,16 @@ setGeneric("age", function(x) standardGeneric("age"))
 setGeneric("age<-", function(x, value) standardGeneric("age<-"))
 ```
 
-
 ```{r}
 setMethod("age", "Person", function(x) x@age)
 setMethod("age<-", "Person", function(x, value) {
-  x@age <- value
-  x
+    x@age <- value
+    x
 })
 
 age(john) <- 50
 age(john)
-
-
-## Exercises
-
+```
 
 ## 1.
 
@@ -77,11 +73,9 @@ x <- lubridate::period(4, units = "years")
 str(x)
 ```
 
-
 ## 2.
 
 The docs say:
-
 
 ```
      Authors of formal (‘S4’) methods can provide documentation on
@@ -126,7 +120,6 @@ The docs say:
 So `methods?f` brings up general method documentation, and documentation on particualr methods can be found by either specifying types in the call,
 or by passing objects with the relevant types, as in the example `?combo(1:10, letters)`
 
-
 # Classes
 
 `setClass` takes three arguments
@@ -135,8 +128,7 @@ or by passing objects with the relevant types, as in the example `?combo(1:10, l
 * Named character vector of names and classes of slots
 * List of slot prototypes - optional, but strongly recommended
 
-
-  ```{r}
+```{r}
 setClass("Person",
     slots = c(
         name = "character",
@@ -165,7 +157,7 @@ str(me)
 #>   ..@ age : num NA
 ```
 
-`is` tests inheritance
+`is` tests inheritance:
 ```{r}
 is(new("Person"))
 #> [1] "Person"
@@ -173,10 +165,8 @@ is(new("Employee"))
 #> [1] "Employee" "Person"
 ```
 
-
 In R, as in Python, classes are both defined and instantiated at
 runtime. Modifying a class after declaring it is an error:
-
 
 ```{r, error = TRUE}
 setClass("A", slots = c(x = "numeric"))
@@ -193,7 +183,6 @@ a
 You should define a helper constructor
 for users and reserve `new` for you,
 the developer:
-
 
 ```{r}
 Person <- function(name, age = NA) {
@@ -250,7 +239,7 @@ all_slots_same_length <- function(object) {
     slots <- slotNames(object)
     out <- TRUE
 
-    if (length(slots) > 1) {
+    if (length(slots) > 0) {
         target <- length(slot(object, slots[[1]]))
         for (slt in slots[-1]) {
             this_length <- length(slot(object, slt))
@@ -271,10 +260,10 @@ me <- new("MyPerson",
 me@role <- list("underachiever")
 ```
 
-## 2. 
+## 2.
 
 It creates a virtual class: one useful as a parent, but not possible to instantiate.
-```{r, error = FALSE}
+```{r, error = TRUE}
 setClass("dummy")
 new("dummy")
 ```
@@ -283,28 +272,31 @@ new("dummy")
 
 Use a helper to convert to integer codes before instantiating. Maybe allow an option for NA as a level.
 ```{}
-setClass("my_factor", slots = c(values = "integer", levels = "character", labels = "character", ordered = "logical"), 
-prototype = list(values = NA_integer_, levels = NA_character, labels = NA_character_, ordered = FALSE)
+setClass("my_factor", contains = "integer",  slots = c( levels = "character", labels = "character", ordered = "logical", NA_level = "logical"),
+prototype = list( levels = character(), labels = character(), ordered = FALSE,
+NA_level = FALSE )
 ```
 
 For dates, both should inherit from a virtual class. `POSIXlt` needs various date components (month, year, etc.), plus a timezone and a format. The time fields should default to zero. `POSIXct` just needs to keep track of seconds since the UNIX epoch, leaving formatting to the print method.
 
 For data frames:
 ```{}
-new("MyDataFrame", slots = c(data = "list", rownames = "character"), prototype = list(data = list(), rownames = character()) )
+new("MyDataFrame", contains = "list",  slots = c(data = "list", rownames = "character", colnames = "character"), prototype = list(data = list(), rownames = character(),
+colnames = character() ))
 ```
 
+We would have to validate the lengths of `rownames` and `colnames`.
 
-## Generics and Methods 
+# Generics and Methods
 
 Generics do method dispatch. Don't wrap the generic name in braces, for some obscure reason.
-
 
 ```{r}
 setGeneric("myGeneric", function(x) standardGeneric("myGeneric"))
 ```
 
 Only one argument should be used: `signature`, controlling the arg used for dispatch. Arguments can be included to force methods to use them.
+
 ```{r}
 setGeneric("myGeneric",
     function(x, ..., verbose = TRUE) standardGeneric("myGeneric"),
@@ -319,8 +311,8 @@ setMethod("myGeneric", "Person", function(x) {
 })
 ```
 
-The `show` method handles printing. You 
-have to retrieve the args for a generic 
+The `show` method handles printing. You
+have to retrieve the args for a generic
 before writing a method for it.
 
 ```{r}
@@ -343,7 +335,6 @@ setMethod("show", "Person", function(object) {
 
 Define reusable generics so interface components can be shared across classes:
 
-
 ```{r}
 setGeneric("name", function(x) standardGeneric("name"))
 setMethod("name", "Person", function(x) x@name)
@@ -353,7 +344,6 @@ name(john)
 ```
 
 Setters, if provided, should always validate.
-
 
 ```{r, error = TRUE}
 setGeneric("name<-", function(x, value) standardGeneric("name<-"))
@@ -372,9 +362,7 @@ name(john) <- letters
 #> same length
 ```
 
-
-## 1. 
-
+## 1.
 
 ```{r}
 setGeneric("age", function(x) standardGeneric("age"))
@@ -382,18 +370,136 @@ setMethod("age", "Person", function(x) x@age)
 age(john)
 ```
 
-## 2. 
+## 2.
 
 `setGeneric` actually creates the generic, while the function passed to it invokes it.
 
-## 3. 
+## 3.
 
 If the name of the class is hard-coded in `show`, subclasses will print the name of the parent class.
 
 ## 4.
 
 We get a warning, but the method still works.
+
 ```{r}
 setMethod("age", "Person", function(y) x@age)
 age(john)
+```
+
+# Method Dispatch
+
+This gets complicated because
+S4 supports both multiple dispatch and multiple inheritance.
+
+The general rule: start with the most specific class of teh arguments, then work upward through parent classes until a method is found.
+
+Methods may be defined for two pseudoclsses:
+
+* ANY, matching all classes
+* MISSING, matching a `NA` argument
+
+  If a class has multiple parents, the nearest one with a defined method is chosen (e.g., a parent over a grandparent). If the distance is the same, the
+  method is "ambiguous."
+  This triggers a warning, and
+  the alphabetically earliest
+  class (seriously?) gets picked.
+  Never allow this to happen.
+
+  Multiple inheritance makes designing clean, unambiguous method graphs a nightmare, so avoid it where possible.
+  Multiple dispatch isn't so bad, because there are often fewer class combinations to deal with.
+  Rule of thumb: if predicting dispatch requires a diagram, simplify.
+
+## 3.
+
+  Because there are multiple terminal classes equidistant from the classes of the arguments, you would have to define methods for each combination, and then the result would still be ambiguous.
+
+# S4 and S3
+
+The `slots` and `contains` arguments can use S3 classes only if they are prepared using `setOldClass`:
+
+```{r}
+setOldClass("data.frame")
+setOldClass(c("ordered", "factor"))
+setOldClass(c("glm", "lm"))
+```
+
+Better to implement them directly in S4:
+
+```{r}
+setClass("factor",
+    contains = "integer",
+    slots = c(
+        levels = "character"
+    ),
+    prototype = structure(
+        integer(),
+        levels = character()
+    )
+)
+setOldClass("factor", S4Class = "factor")
+```
+
+S4 classes that inherit from an
+S3 class have a special `.Data` slot that contains the S3 object:
+
+```{r}
+RangedNumeric <- setClass(
+    "RangedNumeric",
+    contains = "numeric",
+    slots = c(min = "numeric", max = "numeric"),
+    prototype = structure(numeric(), min = NA_real_, max = NA_real_)
+)
+rn <- RangedNumeric(1:10, min = 1, max = 10)
+```
+
+Converting and S3 generic to an S4 makes it the `ANY` method:
+
+```{r}
+setGeneric("mean")
+selectMethod("mean", "ANY")
+#> Method Definition (Class "derivedDefaultMethod"):
+#>
+#> function (x, ...)
+#> UseMethod("mean")
+#> <bytecode: 0x7f7fad935c68>
+#> <environment: namespace:base>
+#>
+#> Signatures:
+#>         x
+#> target  "ANY"
+#> defined "ANY"
+```
+
+This can be, but shouldn't be, done with regular functions.
+
+
+## 1.
+
+```{r}
+setClass("factor",
+    contains = "integer",
+    slots = c(
+        levels = "character",
+        labels = "character",
+        ordered = "logical",
+        NA_level = "logical"
+    ),
+    prototype = structure(
+        integer(),
+        levels = character(),
+        labels = character(),
+        orderd = FALSE,
+        NA_level = FALSE
+    )
+)
+setOldClass("factor", S4Class = "factor")
+```
+
+## 2.
+
+```{r}
+setGeneric("length")
+setMethod("length", "Person", function(x) length(x@name))
+length(john)
 ```
